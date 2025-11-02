@@ -325,14 +325,25 @@ async def a2a_agent(request: Request):
             history=messages + [response_message]
         )
 
-        # Build JSON-RPC response
-        response = JSONRPCResponse(
-            id=rpc_request.id,
-            result=task_result
-        )
+        logger.info(f"📤 Sending Telex A2A response format")
 
-        logger.info(f"📤 Sending A2A response")
-        return response.model_dump()
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_request.id,
+            "result": {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text/plain",
+                                "text": response_text
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
 
     except ValueError as e:
         logger.error(f"💥 Validation error: {str(e)}")
