@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 import logging
 import httpx
+from uuid import uuid4
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -197,27 +198,31 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
-        # Build response
+        # Build response message in A2A format
+        response_message = {
+            "kind": "message",
+            "role": "assistant",
+            "parts": [
+                {
+                    "kind": "text",
+                    "text": response_text
+                }
+            ],
+            "messageId": str(uuid4())
+        }
+
+        # Build complete JSON-RPC response
         response_data = {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "text/plain",
-                                "text": response_text
-                            }
-                        ]
-                    }
-                ]
+            "method": "message/send",  # Add method field for webhook
+            "params": {
+                "message": response_message,
+                "configuration": config
             }
         }
 
         # Check if we need to send to webhook (non-blocking mode)
-        config = params.get("configuration", {})
         push_config = config.get("pushNotificationConfig")
         is_blocking = config.get("blocking", True)
         
@@ -258,9 +263,25 @@ async def a2a_agent(request: Request):
                     "result": {"status": "processing"}
                 }
         
-        # Blocking mode - return response directly
+        # Blocking mode - return response directly (simplified format)
         logger.info(f"↩️ Returning direct response (blocking mode)")
-        return response_data
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text/plain",
+                                "text": response_text
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
 
     except Exception as e:
         logger.error(f"💥 ERROR: {str(e)}", exc_info=True)
