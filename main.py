@@ -30,6 +30,7 @@ async def process_message(user_text: str) -> str:
     
     user_text_lower = user_text.strip().lower()
     
+    # 1. Greetings
     greeting_patterns = r'\b(hi|hello|hey|greetings|good\s*(morning|afternoon|evening)|howdy|sup|yo)\b'
     if re.search(greeting_patterns, user_text_lower):
         return ("Hello! 👋 I'm CurrencyPal, your friendly currency conversion assistant! 💱\n\n"
@@ -39,6 +40,7 @@ async def process_message(user_text: str) -> str:
                 "• Get help: 'help' or 'what can you do'\n\n"
                 "What would you like to know?")
     
+    # 2. Help requests
     help_patterns = r'\b(help|assist|what can you do|commands|how to use|guide|instructions|info|about)\b'
     if re.search(help_patterns, user_text_lower):
         return ("🌟 CurrencyPal Help Guide 🌟\n\n"
@@ -57,36 +59,43 @@ async def process_message(user_text: str) -> str:
                 "• Say 'help' to see this message\n\n"
                 "I support 160+ currencies with real-time rates! 🌍")
     
+    # 3. Thank you responses
     thanks_patterns = r'\b(thanks|thank you|thx|appreciate|cheers)\b'
     if re.search(thanks_patterns, user_text_lower):
         return ("You're very welcome! 😊 Happy to help with currency conversions anytime! 💱\n"
                 "Need anything else? Just ask!")
     
+    # 4. Currency Conversion - Multiple patterns
     conversion_match = None
     
+    # Pattern 1: "convert X FROM to TO"
     conversion_match = re.search(
         r'convert\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+to\s+([a-zA-Z]{3})',
         user_text_lower
     )
     
+    # Pattern 2: "how much is X FROM in TO"
     if not conversion_match:
         conversion_match = re.search(
             r'how\s+much\s+is\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+in\s+([a-zA-Z]{3})',
             user_text_lower
         )
     
+    # Pattern 3: "what is X FROM in TO"
     if not conversion_match:
         conversion_match = re.search(
             r'what\s+is\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+(?:in|to)\s+([a-zA-Z]{3})',
             user_text_lower
         )
     
+    # Pattern 4: "X FROM to TO" (simple)
     if not conversion_match:
         conversion_match = re.search(
             r'(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+(?:to|in)\s+([a-zA-Z]{3})',
             user_text_lower
         )
     
+    # Pattern 5: "help convert X FROM" (with naira context)
     if not conversion_match:
         help_convert_match = re.search(
             r'(?:help|need|want).*?convert(?:ing)?.*?(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})',
@@ -125,6 +134,7 @@ async def process_message(user_text: str) -> str:
         
         return f"✅ {result['message']}"
     
+    # 5. Single currency rate check
     single_rate_match = re.search(
         r'\b([a-zA-Z]{3})\s+(?:rate|to\s+ngn)',
         user_text_lower
@@ -151,6 +161,7 @@ async def process_message(user_text: str) -> str:
             return (f"Sorry, I couldn't find the rate for {currency}. 🤔\n"
                    f"Make sure it's a valid 3-letter currency code (e.g., USD, EUR, GBP).")
     
+    # 6. Multiple rates to Naira
     if re.search(r'\b(rate|rates|exchange)\b', user_text_lower) and \
        re.search(r'\b(ngn|naira|show|all|list)\b', user_text_lower):
         rates = await get_rates_to_naira()
@@ -163,7 +174,7 @@ async def process_message(user_text: str) -> str:
         formatted = "\n".join([f"💱 {rates[cur]['formatted']}" for cur in rates.keys()])
         return f"Here are current rates to Nigerian Naira 🇳🇬:\n\n{formatted}"
     
-
+    # 7. General rate inquiry
     if re.search(r'\b(rates?|exchange)\b', user_text_lower) and \
        not re.search(r'\b([a-zA-Z]{3})\b', user_text_lower):
         rates = await get_rates_to_naira()
@@ -174,6 +185,7 @@ async def process_message(user_text: str) -> str:
         formatted = "\n".join([f"💱 {rates[cur]['formatted']}" for cur in rates.keys()])
         return f"Here are current rates to Nigerian Naira 🇳🇬:\n\n{formatted}"
     
+    # 8. Fallback
     return ("Hmm, I'm not sure I understood that. 🤔\n\n"
            "Here's what I can help with:\n"
            "• **Convert currency:** 'convert 50 USD to NGN' or just '50 USD to NGN'\n"
@@ -182,16 +194,17 @@ async def process_message(user_text: str) -> str:
            "What would you like to do?")
 
 
-
 @app.get("/")
 async def root():
     return {
         "message": "Welcome to CurrencyPal! 💱",
+        "version": "1.0.0",
         "endpoints": {
             "convert": "/convert?from=USD&to=NGN&amount=50",
             "rates": "/rates?currencies=USD,EUR,GBP",
             "chat": "POST /chat with {text: 'your message'}",
-            "a2a": "POST /a2a/agent/currencyAgent (Telex.im integration)"
+            "a2a": "POST /a2a/agent/currencyAgent (Telex.im integration)",
+            "health": "/health"
         }
     }
 
@@ -201,6 +214,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "CurrencyPal",
+        "version": "1.0.0",
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -212,6 +226,8 @@ async def convert(
 ):
     """
     Convert one currency to another using live exchange rates
+    
+    Example: /convert?from=USD&to=NGN&amount=100
     """
     result = await convert_currency(from_currency, to_currency, amount)
     return result
@@ -220,6 +236,7 @@ async def convert(
 async def chat_agent(message: dict):
     """
     Chat endpoint for CurrencyPal - A conversational currency conversion assistant
+    
     Example inputs: 
     - {"text": "hi"} or {"text": "hello"}
     - {"text": "convert 10 usd to ngn"}
@@ -271,7 +288,7 @@ async def a2a_agent(request: dict):
                 "error": "empty_message"
             }
         
-        # Process the message directly using the shared logic
+        # Process the message using shared logic
         response_text = await process_message(user_message)
         
         # Return in A2A protocol format
@@ -304,7 +321,11 @@ async def a2a_agent(request: dict):
 async def rates(
     currencies: str = Query("USD,EUR,GBP,JPY,CAD", description="Comma-separated currency codes (e.g., USD,EUR,GBP)")
 ):
-    """Get multiple currency rates compared to NGN"""
+    """
+    Get multiple currency rates compared to NGN
+    
+    Example: /rates?currencies=USD,EUR,GBP,CAD
+    """
     currency_list = [c.strip().upper() for c in currencies.split(",")]
     rates = await get_rates_to_naira(currency_list)
 
@@ -323,3 +344,22 @@ async def rates(
         "formatted_rates": formatted,
         "message": " | ".join(formatted)
     }
+
+
+# Optional: Handle A2A requests at root endpoint as well
+@app.post("/")
+async def root_a2a(request: dict):
+    """Handle A2A requests at root endpoint if Telex calls base URL"""
+    # Check if this looks like an A2A request
+    if "text" in request or "conversationId" in request:
+        return await a2a_agent(request)
+    
+    # Otherwise return info
+    return await root()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = 8000
+    print(f"🚀 Starting CurrencyPal on http://0.0.0.0:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
