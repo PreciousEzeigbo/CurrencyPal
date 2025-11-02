@@ -1,12 +1,23 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from utils.currency_api import convert_currency, get_rates_to_naira
+from models.a2a import (
+    JSONRPCRequest, JSONRPCResponse, TaskResult, TaskStatus,
+    Artifact, MessagePart, A2AMessage, MessageConfiguration
+)
 import re
 from datetime import datetime
+from uuid import uuid4
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="CurrencyPal", 
-    description="A simple currency conversion agent 💱",
+    description="A2A compliant currency conversion agent 💱",
     version="1.0.0"
 )
 
@@ -68,34 +79,29 @@ async def process_message(user_text: str) -> str:
     # 4. Currency Conversion - Multiple patterns
     conversion_match = None
     
-    # Pattern 1: "convert X FROM to TO"
     conversion_match = re.search(
         r'convert\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+to\s+([a-zA-Z]{3})',
         user_text_lower
     )
     
-    # Pattern 2: "how much is X FROM in TO"
     if not conversion_match:
         conversion_match = re.search(
             r'how\s+much\s+is\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+in\s+([a-zA-Z]{3})',
             user_text_lower
         )
     
-    # Pattern 3: "what is X FROM in TO"
     if not conversion_match:
         conversion_match = re.search(
             r'what\s+is\s+(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+(?:in|to)\s+([a-zA-Z]{3})',
             user_text_lower
         )
     
-    # Pattern 4: "X FROM to TO" (simple)
     if not conversion_match:
         conversion_match = re.search(
             r'(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})\s+(?:to|in)\s+([a-zA-Z]{3})',
             user_text_lower
         )
     
-    # Pattern 5: "help convert X FROM" (with naira context)
     if not conversion_match:
         help_convert_match = re.search(
             r'(?:help|need|want).*?convert(?:ing)?.*?(\d+(?:[.,]\d+)?)\s+([a-zA-Z]{3})',
@@ -105,7 +111,6 @@ async def process_message(user_text: str) -> str:
             amount_str, from_currency = help_convert_match.groups()
             amount = float(amount_str.replace(',', '.'))
             
-            # Check if "naira" or "NGN" is mentioned
             if 'naira' in user_text_lower or 'ngn' in user_text_lower:
                 result = await convert_currency(from_currency, 'NGN', amount)
                 
@@ -118,7 +123,6 @@ async def process_message(user_text: str) -> str:
                 
                 return f"✅ {result['message']}"
     
-    # Process standard conversion patterns
     if conversion_match and len(conversion_match.groups()) >= 3:
         amount_str, from_currency, to_currency = conversion_match.groups()
         amount = float(amount_str.replace(',', '.'))
@@ -199,14 +203,15 @@ async def root():
     return {
         "message": "Welcome to CurrencyPal! 💱",
         "version": "1.0.0",
+        "protocol": "A2A (JSON-RPC 2.0)",
         "endpoints": {
+            "a2a": "POST /a2a/agent/currencyAgent (JSON-RPC 2.0)",
             "convert": "/convert?from=USD&to=NGN&amount=50",
             "rates": "/rates?currencies=USD,EUR,GBP",
-            "chat": "POST /chat with {text: 'your message'}",
-            "a2a": "POST /a2a/agent/currencyAgent (Telex.im integration)",
             "health": "/health"
         }
     }
+
 
 @app.get("/health")
 async def health_check():
@@ -215,127 +220,174 @@ async def health_check():
         "status": "healthy",
         "service": "CurrencyPal",
         "version": "1.0.0",
+        "protocol": "A2A (JSON-RPC 2.0)",
         "timestamp": datetime.utcnow().isoformat()
     }
 
-@app.get("/convert")
-async def convert(
-    from_currency: str = Query(..., min_length=3, max_length=3, description="Currency code (e.g., USD)"),
-    to_currency: str = Query(..., min_length=3, max_length=3, description="Currency code (e.g., NGN)"),
-    amount: float = Query(1.0, gt=0, description="Amount to convert")
-):
-    """
-    Convert one currency to another using live exchange rates
-    
-    Example: /convert?from=USD&to=NGN&amount=100
-    """
-    result = await convert_currency(from_currency, to_currency, amount)
-    return result
-
-@app.post("/chat")
-async def chat_agent(message: dict):
-    """
-    Chat endpoint for CurrencyPal - A conversational currency conversion assistant
-    
-    Example inputs: 
-    - {"text": "hi"} or {"text": "hello"}
-    - {"text": "convert 10 usd to ngn"}
-    - {"text": "how much is 50 EUR in NGN"}
-    - {"text": "show rates"} or {"text": "usd rate"}
-    - {"text": "help"} or {"text": "what can you do"}
-    """
-    user_text = message.get("text", "").strip()
-    response_text = await process_message(user_text)
-    return {"response": response_text}
-
 
 @app.post("/a2a/agent/currencyAgent")
-async def a2a_agent(request: dict):
+async def a2a_agent(request: Request):
     """
-    A2A (Agent-to-Agent) protocol endpoint for Telex.im integration
+    A2A (Agent-to-Agent) protocol endpoint - JSON-RPC 2.0 compliant
     
-    This endpoint follows the A2A protocol format expected by Telex.im
+    Supports two methods:
+    1. message/send - Send a single message
+    2. execute - Execute with message history and context
     
-    Expected request format:
+    Request format:
     {
-        "text": "user message",
-        "conversationId": "unique-conversation-id",
-        "userId": "user-id" (optional),
-        "metadata": {} (optional)
-    }
-    
-    Returns:
-    {
-        "text": "agent response",
-        "conversationId": "same-conversation-id",
-        "agentName": "CurrencyPal",
-        "timestamp": "ISO timestamp"
+        "jsonrpc": "2.0",
+        "id": "request-id",
+        "method": "message/send",
+        "params": {
+            "message": {
+                "kind": "message",
+                "role": "user",
+                "parts": [{"kind": "text", "text": "convert 100 USD to NGN"}]
+            }
+        }
     }
     """
     try:
-        # Extract the user's message and conversation metadata
-        user_message = request.get("text", "")
-        conversation_id = request.get("conversationId", "")
-        user_id = request.get("userId", "")
-        
-        # Validate input
-        if not user_message:
-            return {
-                "text": "I didn't receive any message. Please try again! 😊",
-                "conversationId": conversation_id,
-                "agentName": "CurrencyPal",
-                "timestamp": datetime.utcnow().isoformat(),
-                "error": "empty_message"
+        # Parse request body
+        body = await request.json()
+        logger.info(f"📨 Received A2A request: {body}")
+
+        # Validate JSON-RPC request
+        if body.get("jsonrpc") != "2.0" or "id" not in body:
+            logger.error("❌ Invalid JSON-RPC request")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request: jsonrpc must be '2.0' and id is required"
+                    }
+                }
+            )
+
+        # Parse and validate request
+        rpc_request = JSONRPCRequest(**body)
+
+        # Extract messages
+        messages = []
+        context_id = None
+        task_id = None
+        config = None
+
+        if rpc_request.method == "message/send":
+            messages = [rpc_request.params.message]
+            config = rpc_request.params.configuration
+        elif rpc_request.method == "execute":
+            messages = rpc_request.params.messages
+            context_id = rpc_request.params.contextId
+            task_id = rpc_request.params.taskId
+
+        # Extract user text from messages
+        user_text = ""
+        for message in messages:
+            if message.role == "user":
+                for part in message.parts:
+                    if part.kind == "text" and part.text:
+                        user_text = part.text
+                        break
+                if user_text:
+                    break
+
+        logger.info(f"💬 Processing message: {user_text}")
+
+        # Process the message
+        response_text = await process_message(user_text)
+        logger.info(f"✅ Generated response: {response_text[:100]}...")
+
+        # Generate IDs
+        context_id = context_id or str(uuid4())
+        task_id = task_id or str(uuid4())
+
+        # Build A2A response message
+        response_message = A2AMessage(
+            role="agent",
+            parts=[MessagePart(kind="text", text=response_text)],
+            taskId=task_id
+        )
+
+        # Build task result
+        task_result = TaskResult(
+            id=task_id,
+            contextId=context_id,
+            status=TaskStatus(
+                state="completed",
+                message=response_message
+            ),
+            artifacts=[],
+            history=messages + [response_message]
+        )
+
+        # Build JSON-RPC response
+        response = JSONRPCResponse(
+            id=rpc_request.id,
+            result=task_result
+        )
+
+        logger.info(f"📤 Sending A2A response")
+        return response.model_dump()
+
+    except ValueError as e:
+        logger.error(f"💥 Validation error: {str(e)}")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0",
+                "id": body.get("id") if "body" in locals() else None,
+                "error": {
+                    "code": -32602,
+                    "message": "Invalid params",
+                    "data": {"details": str(e)}
+                }
             }
-        
-        # Process the message using shared logic
-        response_text = await process_message(user_message)
-        
-        # Return in A2A protocol format
-        return {
-            "text": response_text,
-            "conversationId": conversation_id,
-            "agentName": "CurrencyPal",
-            "timestamp": datetime.utcnow().isoformat(),
-            "metadata": {
-                "userId": user_id,
-                "responseType": "success"
-            }
-        }
-        
+        )
     except Exception as e:
-        # Error handling with proper A2A format
-        return {
-            "text": f"I encountered an error processing your request. Please try again! 🔧\n\nError: {str(e)}",
-            "conversationId": request.get("conversationId", ""),
-            "agentName": "CurrencyPal",
-            "timestamp": datetime.utcnow().isoformat(),
-            "metadata": {
-                "responseType": "error",
-                "errorDetails": str(e)
+        logger.error(f"💥 Internal error: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "jsonrpc": "2.0",
+                "id": body.get("id") if "body" in locals() else None,
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error",
+                    "data": {"details": str(e)}
+                }
             }
-        }
+        )
+
+
+# Legacy endpoints for backward compatibility
+@app.get("/convert")
+async def convert(
+    from_currency: str = Query(..., min_length=3, max_length=3),
+    to_currency: str = Query(..., min_length=3, max_length=3),
+    amount: float = Query(1.0, gt=0)
+):
+    """Convert one currency to another"""
+    result = await convert_currency(from_currency, to_currency, amount)
+    return result
 
 
 @app.get("/rates")
 async def rates(
-    currencies: str = Query("USD,EUR,GBP,JPY,CAD", description="Comma-separated currency codes (e.g., USD,EUR,GBP)")
+    currencies: str = Query("USD,EUR,GBP,JPY,CAD")
 ):
-    """
-    Get multiple currency rates compared to NGN
-    
-    Example: /rates?currencies=USD,EUR,GBP,CAD
-    """
+    """Get multiple currency rates compared to NGN"""
     currency_list = [c.strip().upper() for c in currencies.split(",")]
     rates = await get_rates_to_naira(currency_list)
 
     if "error" in rates:
         return {"message": "Couldn't fetch live rates right now.", "error": rates["error"]}
 
-    # Extract formatted messages for display
     formatted = [rates[cur]["formatted"] for cur in rates.keys()]
-    
-    # Also provide raw rates for programmatic use
     raw_rates = {cur: rates[cur]["rate"] for cur in rates.keys()}
 
     return {
@@ -346,20 +398,8 @@ async def rates(
     }
 
 
-# Optional: Handle A2A requests at root endpoint as well
-@app.post("/")
-async def root_a2a(request: dict):
-    """Handle A2A requests at root endpoint if Telex calls base URL"""
-    # Check if this looks like an A2A request
-    if "text" in request or "conversationId" in request:
-        return await a2a_agent(request)
-    
-    # Otherwise return info
-    return await root()
-
-
 if __name__ == "__main__":
     import uvicorn
     port = 8000
-    print(f"🚀 Starting CurrencyPal on http://0.0.0.0:{port}")
+    logger.info(f"🚀 Starting CurrencyPal on http://0.0.0.0:{port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
