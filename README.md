@@ -36,8 +36,8 @@ CurrencyPal is a FastAPI-based currency conversion service that provides real-ti
 
 ```bash
 # 1. Clone the repository
-git clone <repository-url>
-cd currencypal
+git clone https://github.com/PreciousEzeigbo/CurrencyPal
+cd CurrencyPal
 
 # 2. Create virtual environment
 python3 -m venv venv
