@@ -219,8 +219,11 @@ async def a2a_agent(request: Request):
         # Check if we need to send to webhook (non-blocking mode)
         config = params.get("configuration", {})
         push_config = config.get("pushNotificationConfig")
+        is_blocking = config.get("blocking", True)
         
-        if push_config and not config.get("blocking", True):
+        logger.info(f"🔍 Mode: blocking={is_blocking}, has_webhook={bool(push_config)}")
+        
+        if push_config and not is_blocking:
             # Non-blocking mode - send to webhook
             webhook_url = push_config.get("url")
             token = push_config.get("token")
@@ -231,17 +234,22 @@ async def a2a_agent(request: Request):
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         headers = {
-                            "Content-Type": "application/json",
-                            "Authorization": f"Bearer {token}"
+                            "Content-Type": "application/json"
                         }
+                        
+                        # Add Bearer token if provided
+                        if token:
+                            headers["Authorization"] = f"Bearer {token}"
+                        
                         webhook_response = await client.post(
                             webhook_url,
                             json=response_data,
                             headers=headers
                         )
                         logger.info(f"✅ Webhook sent: {webhook_response.status_code}")
+                        logger.info(f"📨 Webhook response: {webhook_response.text}")
                 except Exception as e:
-                    logger.error(f"❌ Webhook error: {str(e)}")
+                    logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
                 
                 # Return acknowledgment
                 return {
@@ -251,6 +259,7 @@ async def a2a_agent(request: Request):
                 }
         
         # Blocking mode - return response directly
+        logger.info(f"↩️ Returning direct response (blocking mode)")
         return response_data
 
     except Exception as e:
