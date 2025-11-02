@@ -1,12 +1,44 @@
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from utils.currency_api import convert_currency, get_rates_to_naira
 import re
+from datetime import datetime
 
-app = FastAPI(title="CurrencyPal", description="A simple currency conversion agent 💱")
+app = FastAPI(
+    title="CurrencyPal", 
+    description="A simple currency conversion agent 💱",
+    version="1.0.0"
+)
+
+# Add CORS middleware for Telex.im integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to CurrencyPal! Try /convert?from=USD&to=NGN&amount=50"}
+    return {
+        "message": "Welcome to CurrencyPal! 💱",
+        "endpoints": {
+            "convert": "/convert?from=USD&to=NGN&amount=50",
+            "rates": "/rates?currencies=USD,EUR,GBP",
+            "chat": "POST /chat with {text: 'your message'}",
+            "a2a": "POST /a2a/agent/currencyAgent (Telex.im integration)"
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "service": "CurrencyPal",
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 @app.get("/convert")
 async def convert(
@@ -19,8 +51,6 @@ async def convert(
     """
     result = await convert_currency(from_currency, to_currency, amount)
     return result
-
-import re
 
 @app.post("/chat")
 async def chat_agent(message: dict):
@@ -195,6 +225,74 @@ async def chat_agent(message: dict):
                    "• **Get help:** Type 'help'\n\n"
                    "What would you like to do?"
     }
+
+
+@app.post("/a2a/agent/currencyAgent")
+async def a2a_agent(request: dict):
+    """
+    A2A (Agent-to-Agent) protocol endpoint for Telex.im integration
+    
+    This endpoint follows the A2A protocol format expected by Telex.im
+    
+    Expected request format:
+    {
+        "text": "user message",
+        "conversationId": "unique-conversation-id",
+        "userId": "user-id" (optional),
+        "metadata": {} (optional)
+    }
+    
+    Returns:
+    {
+        "text": "agent response",
+        "conversationId": "same-conversation-id",
+        "agentName": "CurrencyPal",
+        "timestamp": "ISO timestamp"
+    }
+    """
+    try:
+        # Extract the user's message and conversation metadata
+        user_message = request.get("text", "")
+        conversation_id = request.get("conversationId", "")
+        user_id = request.get("userId", "")
+        
+        # Validate input
+        if not user_message:
+            return {
+                "text": "I didn't receive any message. Please try again! 😊",
+                "conversationId": conversation_id,
+                "agentName": "CurrencyPal",
+                "timestamp": datetime.utcnow().isoformat(),
+                "error": "empty_message"
+            }
+        
+        # Use your existing chat logic to process the message
+        chat_response = await chat_agent({"text": user_message})
+        
+        # Return in A2A protocol format
+        return {
+            "text": chat_response.get("response", "Sorry, I couldn't process that request."),
+            "conversationId": conversation_id,
+            "agentName": "CurrencyPal",
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {
+                "userId": user_id,
+                "responseType": "success"
+            }
+        }
+        
+    except Exception as e:
+        # Error handling with proper A2A format
+        return {
+            "text": f"I encountered an error processing your request. Please try again! 🔧\n\nError: {str(e)}",
+            "conversationId": request.get("conversationId", ""),
+            "agentName": "CurrencyPal",
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {
+                "responseType": "error",
+                "errorDetails": str(e)
+            }
+        }
 
 
 @app.get("/rates")
