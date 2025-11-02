@@ -10,6 +10,8 @@ import re
 from datetime import datetime
 from uuid import uuid4
 import logging
+import httpx
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +31,25 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+async def send_webhook_notification(url: str, token: str, data: dict):
+    """Send webhook notification to Telex.im for non-blocking requests"""
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Webhook notification sent successfully")
+            else:
+                logger.error(f"❌ Webhook notification failed: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"💥 Webhook notification error: {str(e)}", exc_info=True)
 
 
 async def process_message(user_text: str) -> str:
@@ -325,9 +346,8 @@ async def a2a_agent(request: Request):
             history=messages + [response_message]
         )
 
-        logger.info(f"📤 Sending Telex A2A response format")
-
-        return {
+        # Build response
+        response_data = {
             "jsonrpc": "2.0",
             "id": rpc_request.id,
             "result": {
@@ -338,12 +358,25 @@ async def a2a_agent(request: Request):
                             {
                                 "type": "text/plain",
                                 "text": response_text
-                                }
-                            ]
-                        }
-                    ]
-                }
+                            }
+                        ]
+                    }
+                ]
             }
+        }
+
+        # Check if we need to send a webhook notification (non-blocking mode)
+        if config and hasattr(config, 'pushNotificationConfig') and config.pushNotificationConfig:
+            webhook_url = config.pushNotificationConfig.url
+            webhook_token = config.pushNotificationConfig.token
+            
+            logger.info(f"📤 Sending webhook notification to {webhook_url}")
+            
+            # Send webhook in background (don't wait)
+            asyncio.create_task(send_webhook_notification(webhook_url, webhook_token, response_data))
+        
+        logger.info(f"📤 Sending Telex A2A response format")
+        return response_data
 
     except ValueError as e:
         logger.error(f"💥 Validation error: {str(e)}")
