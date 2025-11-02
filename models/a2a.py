@@ -8,7 +8,7 @@ class MessagePart(BaseModel):
     """A part of a message (text, data, or file)"""
     kind: Literal["text", "data", "file"]
     text: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any] | List[Any]] = None  # Can be dict or list (for history)
     file_url: Optional[str] = None
 
 
