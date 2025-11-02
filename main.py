@@ -33,32 +33,23 @@ app.add_middleware(
 )
 
 
-async def send_webhook_notification(url: str, token: str, response_text: str, request_id: str):
+async def send_webhook_notification(url: str, token: str, response_data: dict, original_request_id: str):
     """Send webhook notification to Telex.im for non-blocking requests"""
     try:
+        # Telex.im expects a JSON-RPC request format in the webhook, not just the result
+        webhook_payload = {
+            "jsonrpc": "2.0",
+            "id": original_request_id,
+            "method": "message/send",
+            "params": response_data.get("result", {})
+        }
+        
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
         }
         
-        # Build the webhook payload in A2A format
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "message/send",
-            "params": {
-                "message": {
-                    "kind": "message",
-                    "role": "assistant",
-                    "parts": [
-                        {
-                            "kind": "text",
-                            "text": response_text
-                        }
-                    ]
-                }
-            }
-        }
+        logger.info(f"📦 Webhook payload: {webhook_payload}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=webhook_payload, headers=headers)
@@ -395,7 +386,7 @@ async def a2a_agent(request: Request):
             asyncio.create_task(send_webhook_notification(
                 webhook_url, 
                 webhook_token, 
-                response_text,
+                response_data,
                 rpc_request.id
             ))
         
