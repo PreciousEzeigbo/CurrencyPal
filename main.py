@@ -5,6 +5,7 @@ from utils.currency_api import convert_currency, get_rates_to_naira
 import re
 from datetime import datetime
 import logging
+import httpx
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -196,8 +197,8 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
-        # Return in Telex format (from logs)
-        return {
+        # Build response
+        response_data = {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
@@ -214,6 +215,43 @@ async def a2a_agent(request: Request):
                 ]
             }
         }
+
+        # Check if we need to send to webhook (non-blocking mode)
+        config = params.get("configuration", {})
+        push_config = config.get("pushNotificationConfig")
+        
+        if push_config and not config.get("blocking", True):
+            # Non-blocking mode - send to webhook
+            webhook_url = push_config.get("url")
+            token = push_config.get("token")
+            
+            if webhook_url:
+                logger.info(f"📤 Sending to webhook: {webhook_url}")
+                
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        headers = {
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {token}"
+                        }
+                        webhook_response = await client.post(
+                            webhook_url,
+                            json=response_data,
+                            headers=headers
+                        )
+                        logger.info(f"✅ Webhook sent: {webhook_response.status_code}")
+                except Exception as e:
+                    logger.error(f"❌ Webhook error: {str(e)}")
+                
+                # Return acknowledgment
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"status": "processing"}
+                }
+        
+        # Blocking mode - return response directly
+        return response_data
 
     except Exception as e:
         logger.error(f"💥 ERROR: {str(e)}", exc_info=True)
