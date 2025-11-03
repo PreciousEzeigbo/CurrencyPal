@@ -247,8 +247,11 @@ async def a2a_agent(request: Request):
         is_blocking = config.get("blocking", True) # Default to blocking if not specified
         
         logger.info(f"🔍 Mode: blocking={is_blocking}, has_webhook={bool(push_config)}")
+        logger.info(f"🔍 Config object: {config}")
+        logger.info(f"🔍 Push config: {push_config}")
 
         if push_config and not is_blocking:
+            logger.info("🎯 ENTERING NON-BLOCKING WEBHOOK MODE")
             # Non-blocking mode - send full A2A result to webhook
             webhook_url = push_config.get("url")
             token = push_config.get("token")
@@ -275,15 +278,22 @@ async def a2a_agent(request: Request):
                         if token:
                             headers["Authorization"] = f"Bearer {token}"
                         
+                        logger.info(f"🔧 Webhook URL: {webhook_url}")
+                        logger.info(f"🔧 Webhook Payload: {webhook_payload}")
+                        logger.info(f"🔧 Webhook Headers: {headers}")
+                        
                         webhook_response = await client.post(
                             webhook_url,
                             json=webhook_payload,
                             headers=headers
                         )
-                        logger.info(f"✅ Webhook sent: {webhook_response.status_code}")
+                        logger.info(f"✅ Webhook sent successfully!")
+                        logger.info(f"📊 Status code: {webhook_response.status_code}")
                         logger.info(f"📨 Webhook response: {webhook_response.text}")
+                        logger.info(f"📨 Webhook headers: {webhook_response.headers}")
                 except Exception as e:
                     logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
+                    logger.error(f"❌ Webhook URL was: {webhook_url}")
                 
                 # Return acknowledgment for non-blocking mode
                 return {
