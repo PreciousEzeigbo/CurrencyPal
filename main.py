@@ -198,6 +198,9 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
+        # Get configuration
+        config = params.get("configuration", {})
+
         # Build response message in A2A format
         response_message = {
             "kind": "message",
@@ -211,11 +214,11 @@ async def a2a_agent(request: Request):
             "messageId": str(uuid4())
         }
 
-        # Build complete JSON-RPC response
-        response_data = {
+        # Build complete JSON-RPC response for webhook
+        webhook_payload = {
             "jsonrpc": "2.0",
             "id": request_id,
-            "method": "message/send",  # Add method field for webhook
+            "method": "message/send",
             "params": {
                 "message": response_message,
                 "configuration": config
