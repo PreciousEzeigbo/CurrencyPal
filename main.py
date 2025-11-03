@@ -204,7 +204,7 @@ async def a2a_agent(request: Request):
         # Build response message in A2A format
         response_message = {
             "kind": "message",
-            "role": "assistant",
+            "role": "agent",
             "parts": [
                 {
                     "kind": "text",
@@ -274,7 +274,7 @@ async def a2a_agent(request: Request):
             "result": {
                 "messages": [
                     {
-                        "role": "assistant",
+                        "role": "agent",
                         "content": [
                             {
                                 "type": "text/plain",
