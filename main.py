@@ -149,48 +149,74 @@ async def a2a_agent(request: Request):
     """
     Telex A2A endpoint - matches the working format from logs
     """
+    body = None # Initialize body to None
+    request_id = str(uuid4()) # Default request_id
+
     try:
         body = await request.json()
         logger.info(f"📨 REQUEST: {body}")
 
-        # Validate JSON-RPC
-        if body.get("jsonrpc") != "2.0" or "id" not in body:
+        # Auto-generate ID if missing
+        request_id = body.get("id", str(uuid4()))
+
+        # Validate JSON-RPC version
+        if body.get("jsonrpc") != "2.0":
             return JSONResponse(
-                status_code=400,
+                status_code=200, # Return 200 with error object
                 content={
                     "jsonrpc": "2.0",
-                    "id": body.get("id"),
+                    "id": request_id,
                     "error": {
                         "code": -32600,
-                        "message": "Invalid Request"
+                        "message": "Invalid JSON-RPC version. Must be '2.0'."
                     }
                 }
             )
 
-        request_id = body.get("id")
         params = body.get("params", {})
         message = params.get("message", {})
         
-        # Extract user text - handle Telex's concatenated format
+        # Extract user text - handle Telex's concatenated format with multiple fallbacks
         user_text = ""
         parts = message.get("parts", [])
         
         if parts:
-            # Get the first part's text
+            # Attempt to get text from the first part
             first_part = parts[0]
             if first_part.get("kind") == "text":
                 all_text = first_part.get("text", "")
                 
-                # Split by "convert" and take the last one
+                # Fallback 1: Split by "convert" and take the last one
                 if "convert" in all_text.lower():
                     sentences = all_text.lower().split("convert")
                     if len(sentences) > 1:
                         user_text = "convert" + sentences[-1].strip()
                     else:
                         user_text = all_text.strip()
-                else:
-                    # Take just the last 100 characters if no "convert"
+                # Fallback 2: Take just the last 100 characters if no "convert"
+                elif len(all_text) > 100:
                     user_text = all_text[-100:].strip()
+                # Fallback 3: Use the entire text if shorter than 100 chars
+                else:
+                    user_text = all_text.strip()
+            
+            # Fallback 4: Check if there's a 'data' part with text
+            if not user_text and first_part.get("kind") == "data":
+                data_parts = first_part.get("data", [])
+                if isinstance(data_parts, list) and data_parts:
+                    # Try to find the last text entry in the data array
+                    for item in reversed(data_parts):
+                        if isinstance(item, dict) and item.get("kind") == "text" and item.get("text"):
+                            user_text = item["text"].strip()
+                            # Clean HTML tags if present
+                            user_text = re.sub(r'<[^>]+>', '', user_text)
+                            break
+                    # If still no text, try to get the last string directly
+                    if not user_text:
+                        for item in reversed(data_parts):
+                            if isinstance(item, str):
+                                user_text = item.strip()
+                                break
         
         logger.info(f"💬 EXTRACTED: {user_text}")
 
@@ -198,7 +224,7 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
-        logger.info(f"↩️ Returning direct response (A2A compliant)")
+        # Build A2A compliant TaskResult
         return {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -216,7 +242,7 @@ async def a2a_agent(request: Request):
                                 "text": response_text
                             }
                         ],
-                        "messageId": request_id # Using request_id as messageId for simplicity
+                        "messageId": str(uuid4()) # Generate a new messageId
                     }
                 },
                 "artifacts": [],
@@ -226,14 +252,15 @@ async def a2a_agent(request: Request):
 
     except Exception as e:
         logger.error(f"💥 ERROR: {str(e)}", exc_info=True)
+        # Return 200 with error object for internal errors
         return JSONResponse(
-            status_code=500,
+            status_code=200,
             content={
                 "jsonrpc": "2.0",
-                "id": body.get("id") if "body" in locals() else None,
+                "id": request_id, # Use the generated or extracted request_id
                 "error": {
                     "code": -32603,
-                    "message": "Internal error",
+                    "message": "Internal error processing request",
                     "data": {"details": str(e)}
                 }
             }
