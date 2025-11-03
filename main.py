@@ -149,48 +149,69 @@ async def a2a_agent(request: Request):
     """
     Telex A2A endpoint - matches the working format from logs
     """
+    body = None # Initialize body to None
+    request_id = str(uuid4()) # Default request_id
+
     try:
         body = await request.json()
         logger.info(f"📨 REQUEST: {body}")
 
-        # Validate JSON-RPC
-        if body.get("jsonrpc") != "2.0" or "id" not in body:
+        # Auto-generate ID if missing
+        request_id = body.get("id", str(uuid4()))
+
+        # Validate JSON-RPC version
+        if body.get("jsonrpc") != "2.0":
             return JSONResponse(
-                status_code=400,
+                status_code=200, # Return 200 with error object
                 content={
                     "jsonrpc": "2.0",
-                    "id": body.get("id"),
+                    "id": request_id,
                     "error": {
                         "code": -32600,
-                        "message": "Invalid Request"
+                        "message": "Invalid JSON-RPC version. Must be '2.0'."
                     }
                 }
             )
 
-        request_id = body.get("id")
         params = body.get("params", {})
         message = params.get("message", {})
         
-        # Extract user text - handle Telex's concatenated format
+        # Extract user text - prioritize the most recent user message from the conversation history
         user_text = ""
         parts = message.get("parts", [])
-        
-        if parts:
-            # Get the first part's text
-            first_part = parts[0]
-            if first_part.get("kind") == "text":
-                all_text = first_part.get("text", "")
-                
-                # Split by "convert" and take the last one
-                if "convert" in all_text.lower():
-                    sentences = all_text.lower().split("convert")
-                    if len(sentences) > 1:
-                        user_text = "convert" + sentences[-1].strip()
+
+        # Iterate through parts in reverse to find the most recent user input
+        for part in reversed(parts):
+            if part.get("kind") == "data":
+                data_entries = part.get("data", [])
+                if isinstance(data_entries, list) and data_entries:
+                    # Iterate through data entries in reverse to find the last user text
+                    for entry in reversed(data_entries):
+                        if isinstance(entry, dict) and entry.get("kind") == "text" and entry.get("text"):
+                            # Clean HTML tags if present
+                            cleaned_text = re.sub(r'<[^>]+>', '', entry["text"]).strip()
+                            if cleaned_text:
+                                user_text = cleaned_text
+                                break
+                    if user_text:
+                        break # Found user text in data, stop searching
+            elif part.get("kind") == "text":
+                # Fallback to the last 'text' part if no user input found in 'data'
+                current_text = part.get("text", "").strip()
+                if current_text and not user_text: # Only use if user_text is still empty
+                    # Apply the "split by convert" or "last 100 chars" logic
+                    if "convert" in current_text.lower():
+                        sentences = current_text.lower().split("convert")
+                        if len(sentences) > 1:
+                            user_text = "convert" + sentences[-1].strip()
+                        else:
+                            user_text = current_text
+                    elif len(current_text) > 100:
+                        user_text = current_text[-100:].strip()
                     else:
-                        user_text = all_text.strip()
-                else:
-                    # Take just the last 100 characters if no "convert"
-                    user_text = all_text[-100:].strip()
+                        user_text = current_text
+            if user_text:
+                break # Found user text, stop searching
         
         logger.info(f"💬 EXTRACTED: {user_text}")
 
@@ -198,104 +219,105 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
+        # Build A2A compliant TaskResult structure
+        a2a_result = {
+            "id": request_id,
+            "contextId": request_id, # Assuming contextId can be the same as request_id for simplicity
+            "status": {
+                "state": "completed",
+                "message": {
+                    "kind": "message",
+                    "role": "agent",
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": response_text
+                        }
+                    ],
+                    "messageId": str(uuid4()) # Generate a new messageId
+                }
+            },
+            "artifacts": [],
+            "history": [],
+            "kind": "task" # Add the missing 'kind' field
+        }
+
         # Get configuration
         config = params.get("configuration", {})
-
-        # Build response message in A2A format
-        response_message = {
-            "kind": "message",
-            "role": "assistant",
-            "parts": [
-                {
-                    "kind": "text",
-                    "text": response_text
-                }
-            ],
-            "messageId": str(uuid4())
-        }
-
-        # Build complete JSON-RPC response for webhook
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "message/send",
-            "params": {
-                "message": response_message,
-                "configuration": config
-            }
-        }
-
-        # Check if we need to send to webhook (non-blocking mode)
         push_config = config.get("pushNotificationConfig")
-        is_blocking = config.get("blocking", True)
+        is_blocking = config.get("blocking", True) # Default to blocking if not specified
         
         logger.info(f"🔍 Mode: blocking={is_blocking}, has_webhook={bool(push_config)}")
-        
+        logger.info(f"🔍 Config object: {config}")
+        logger.info(f"🔍 Push config: {push_config}")
+
         if push_config and not is_blocking:
-            # Non-blocking mode - send to webhook
+            logger.info("🎯 ENTERING NON-BLOCKING WEBHOOK MODE")
+            # Non-blocking mode - send full A2A result to webhook
             webhook_url = push_config.get("url")
             token = push_config.get("token")
             
             if webhook_url:
-                logger.info(f"📤 Sending to webhook: {webhook_url}")
+                logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
+                # Construct the webhook payload as a JSON-RPC RESPONSE (not request)
+                webhook_payload = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": a2a_result["status"]["message"] # Send the A2AMessage object directly
+                }
+
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         headers = {
                             "Content-Type": "application/json"
                         }
-                        
-                        # Add Bearer token if provided
                         if token:
                             headers["Authorization"] = f"Bearer {token}"
+                        
+                        logger.info(f"🔧 Webhook URL: {webhook_url}")
+                        logger.info(f"🔧 Webhook Payload: {webhook_payload}")
+                        logger.info(f"🔧 Webhook Headers: {headers}")
                         
                         webhook_response = await client.post(
                             webhook_url,
                             json=webhook_payload,
                             headers=headers
                         )
-                        logger.info(f"✅ Webhook sent: {webhook_response.status_code}")
+                        logger.info(f"✅ Webhook sent successfully!")
+                        logger.info(f"📊 Status code: {webhook_response.status_code}")
                         logger.info(f"📨 Webhook response: {webhook_response.text}")
+                        logger.info(f"📨 Webhook headers: {webhook_response.headers}")
                 except Exception as e:
                     logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
+                    logger.error(f"❌ Webhook URL was: {webhook_url}")
                 
-                # Return acknowledgment
+                # Return acknowledgment for non-blocking mode
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "result": {"status": "processing"}
                 }
         
-        # Blocking mode - return response directly (simplified format)
-        logger.info(f"↩️ Returning direct response (blocking mode)")
+        # Blocking mode or no webhook config - return full A2A result directly
+        logger.info(f"↩️ Returning direct A2A result (blocking mode or no webhook)")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "text/plain",
-                                "text": response_text
-                            }
-                        ]
-                    }
-                ]
-            }
+            "result": a2a_result
         }
 
     except Exception as e:
         logger.error(f"💥 ERROR: {str(e)}", exc_info=True)
+        # Return 200 with error object for internal errors
         return JSONResponse(
-            status_code=500,
+            status_code=200,
             content={
                 "jsonrpc": "2.0",
-                "id": body.get("id") if "body" in locals() else None,
+                "id": request_id, # Use the generated or extracted request_id
                 "error": {
                     "code": -32603,
-                    "message": "Internal error",
+                    "message": "Internal error processing request",
                     "data": {"details": str(e)}
                 }
             }
@@ -333,6 +355,7 @@ async def rates(currencies: str = Query("USD,EUR,GBP,JPY,CAD")):
 
 if __name__ == "__main__":
     import uvicorn
-    port = 8000
+    import os
+    port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting CurrencyPal on http://0.0.0.0:{port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
