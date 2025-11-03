@@ -256,15 +256,14 @@ async def a2a_agent(request: Request):
             if webhook_url:
                 logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
-                # Construct the webhook payload with the full A2A result
+                # Construct the webhook payload with the A2A message
                 webhook_payload = {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "method": "message/send",
                     "params": {
-                        "message": a2a_result["status"]["message"], # Extract the message part
-                        "configuration": config,
-                        "result": a2a_result # Include the full result for completeness
+                        "message": a2a_result["status"]["message"], # This is the actual message to be sent
+                        "configuration": config
                     }
                 }
 
