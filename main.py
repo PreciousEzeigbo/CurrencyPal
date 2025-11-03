@@ -354,6 +354,7 @@ async def rates(currencies: str = Query("USD,EUR,GBP,JPY,CAD")):
 
 if __name__ == "__main__":
     import uvicorn
-    port = 8000
+    import os
+    port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting CurrencyPal on http://0.0.0.0:{port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
