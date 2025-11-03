@@ -10,6 +10,8 @@ class MessagePart(BaseModel):
     text: Optional[str] = None
     data: Optional[Dict[str, Any] | List[Any]] = None  # Can be dict or list (for history)
     file_url: Optional[str] = None
+    taskId: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class A2AMessage(BaseModel):

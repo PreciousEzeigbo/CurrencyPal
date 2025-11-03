@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 import logging
 import httpx
+from uuid import uuid4
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -197,22 +198,29 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
-        logger.info(f"↩️ Returning direct response")
+        logger.info(f"↩️ Returning direct response (A2A compliant)")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "messages": [
-                    {
+                "id": request_id,
+                "contextId": request_id, # Assuming contextId can be the same as request_id for simplicity
+                "status": {
+                    "state": "completed",
+                    "message": {
+                        "kind": "message",
                         "role": "agent",
-                        "content": [
+                        "parts": [
                             {
-                                "type": "text/plain",
+                                "kind": "text",
                                 "text": response_text
                             }
-                        ]
+                        ],
+                        "messageId": request_id # Using request_id as messageId for simplicity
                     }
-                ]
+                },
+                "artifacts": [],
+                "history": []
             }
         }
 
