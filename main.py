@@ -6,7 +6,6 @@ import re
 from datetime import datetime
 import logging
 import httpx
-from uuid import uuid4
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -198,76 +197,7 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
-        # Get configuration
-        config = params.get("configuration", {})
-
-        # Build response message in A2A format
-        response_message = {
-            "kind": "message",
-            "role": "agent",
-            "parts": [
-                {
-                    "kind": "text",
-                    "text": response_text
-                }
-            ],
-            "messageId": str(uuid4())
-        }
-
-        # Build complete JSON-RPC response for webhook
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "message/send",
-            "params": {
-                "message": response_message,
-                "configuration": config
-            }
-        }
-
-        # Check if we need to send to webhook (non-blocking mode)
-        push_config = config.get("pushNotificationConfig")
-        is_blocking = config.get("blocking", True)
-        
-        logger.info(f"🔍 Mode: blocking={is_blocking}, has_webhook={bool(push_config)}")
-        
-        if push_config and not is_blocking:
-            # Non-blocking mode - send to webhook
-            webhook_url = push_config.get("url")
-            token = push_config.get("token")
-            
-            if webhook_url:
-                logger.info(f"📤 Sending to webhook: {webhook_url}")
-                
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        headers = {
-                            "Content-Type": "application/json"
-                        }
-                        
-                        # Add Bearer token if provided
-                        if token:
-                            headers["Authorization"] = f"Bearer {token}"
-                        
-                        webhook_response = await client.post(
-                            webhook_url,
-                            json=webhook_payload,
-                            headers=headers
-                        )
-                        logger.info(f"✅ Webhook sent: {webhook_response.status_code}")
-                        logger.info(f"📨 Webhook response: {webhook_response.text}")
-                except Exception as e:
-                    logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
-                
-                # Return acknowledgment
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"status": "processing"}
-                }
-        
-        # Blocking mode - return response directly (simplified format)
-        logger.info(f"↩️ Returning direct response (blocking mode)")
+        logger.info(f"↩️ Returning direct response")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
