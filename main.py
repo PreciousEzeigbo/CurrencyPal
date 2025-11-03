@@ -263,9 +263,7 @@ async def a2a_agent(request: Request):
                 webhook_payload = {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {
-                        "message": a2a_result["status"]["message"]  # Send the message in result
-                    }
+                    "result": a2a_result # Send the full A2A result object
                 }
 
                 try:
