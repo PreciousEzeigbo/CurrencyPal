@@ -176,47 +176,42 @@ async def a2a_agent(request: Request):
         params = body.get("params", {})
         message = params.get("message", {})
         
-        # Extract user text - handle Telex's concatenated format with multiple fallbacks
+        # Extract user text - prioritize the most recent user message from the conversation history
         user_text = ""
         parts = message.get("parts", [])
-        
-        if parts:
-            # Attempt to get text from the first part
-            first_part = parts[0]
-            if first_part.get("kind") == "text":
-                all_text = first_part.get("text", "")
-                
-                # Fallback 1: Split by "convert" and take the last one
-                if "convert" in all_text.lower():
-                    sentences = all_text.lower().split("convert")
-                    if len(sentences) > 1:
-                        user_text = "convert" + sentences[-1].strip()
-                    else:
-                        user_text = all_text.strip()
-                # Fallback 2: Take just the last 100 characters if no "convert"
-                elif len(all_text) > 100:
-                    user_text = all_text[-100:].strip()
-                # Fallback 3: Use the entire text if shorter than 100 chars
-                else:
-                    user_text = all_text.strip()
-            
-            # Fallback 4: Check if there's a 'data' part with text
-            if not user_text and first_part.get("kind") == "data":
-                data_parts = first_part.get("data", [])
-                if isinstance(data_parts, list) and data_parts:
-                    # Try to find the last text entry in the data array
-                    for item in reversed(data_parts):
-                        if isinstance(item, dict) and item.get("kind") == "text" and item.get("text"):
-                            user_text = item["text"].strip()
+
+        # Iterate through parts in reverse to find the most recent user input
+        for part in reversed(parts):
+            if part.get("kind") == "data":
+                data_entries = part.get("data", [])
+                if isinstance(data_entries, list) and data_entries:
+                    # Iterate through data entries in reverse to find the last user text
+                    for entry in reversed(data_entries):
+                        if isinstance(entry, dict) and entry.get("kind") == "text" and entry.get("text"):
                             # Clean HTML tags if present
-                            user_text = re.sub(r'<[^>]+>', '', user_text)
-                            break
-                    # If still no text, try to get the last string directly
-                    if not user_text:
-                        for item in reversed(data_parts):
-                            if isinstance(item, str):
-                                user_text = item.strip()
+                            cleaned_text = re.sub(r'<[^>]+>', '', entry["text"]).strip()
+                            if cleaned_text:
+                                user_text = cleaned_text
                                 break
+                    if user_text:
+                        break # Found user text in data, stop searching
+            elif part.get("kind") == "text":
+                # Fallback to the last 'text' part if no user input found in 'data'
+                current_text = part.get("text", "").strip()
+                if current_text and not user_text: # Only use if user_text is still empty
+                    # Apply the "split by convert" or "last 100 chars" logic
+                    if "convert" in current_text.lower():
+                        sentences = current_text.lower().split("convert")
+                        if len(sentences) > 1:
+                            user_text = "convert" + sentences[-1].strip()
+                        else:
+                            user_text = current_text
+                    elif len(current_text) > 100:
+                        user_text = current_text[-100:].strip()
+                    else:
+                        user_text = current_text
+            if user_text:
+                break # Found user text, stop searching
         
         logger.info(f"💬 EXTRACTED: {user_text}")
 
