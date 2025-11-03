@@ -238,7 +238,8 @@ async def a2a_agent(request: Request):
                 }
             },
             "artifacts": [],
-            "history": []
+            "history": [],
+            "kind": "task" # Add the missing 'kind' field
         }
 
         # Get configuration
