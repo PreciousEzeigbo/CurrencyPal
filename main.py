@@ -219,30 +219,86 @@ async def a2a_agent(request: Request):
         response_text = await process_message(user_text)
         logger.info(f"✅ RESPONSE: {response_text[:100]}...")
 
-        # Build A2A compliant TaskResult
+        # Build A2A compliant TaskResult structure
+        a2a_result = {
+            "id": request_id,
+            "contextId": request_id, # Assuming contextId can be the same as request_id for simplicity
+            "status": {
+                "state": "completed",
+                "message": {
+                    "kind": "message",
+                    "role": "agent",
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": response_text
+                        }
+                    ],
+                    "messageId": str(uuid4()) # Generate a new messageId
+                }
+            },
+            "artifacts": [],
+            "history": []
+        }
+
+        # Get configuration
+        config = params.get("configuration", {})
+        push_config = config.get("pushNotificationConfig")
+        is_blocking = config.get("blocking", True) # Default to blocking if not specified
+        
+        logger.info(f"🔍 Mode: blocking={is_blocking}, has_webhook={bool(push_config)}")
+
+        if push_config and not is_blocking:
+            # Non-blocking mode - send full A2A result to webhook
+            webhook_url = push_config.get("url")
+            token = push_config.get("token")
+            
+            if webhook_url:
+                logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
+                
+                # Construct the webhook payload with the full A2A result
+                webhook_payload = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "message/send",
+                    "params": {
+                        "message": a2a_result["status"]["message"], # Extract the message part
+                        "configuration": config,
+                        "result": a2a_result # Include the full result for completeness
+                    }
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        headers = {
+                            "Content-Type": "application/json"
+                        }
+                        if token:
+                            headers["Authorization"] = f"Bearer {token}"
+                        
+                        webhook_response = await client.post(
+                            webhook_url,
+                            json=webhook_payload,
+                            headers=headers
+                        )
+                        logger.info(f"✅ Webhook sent: {webhook_response.status_code}")
+                        logger.info(f"📨 Webhook response: {webhook_response.text}")
+                except Exception as e:
+                    logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
+                
+                # Return acknowledgment for non-blocking mode
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"status": "processing"}
+                }
+        
+        # Blocking mode or no webhook config - return full A2A result directly
+        logger.info(f"↩️ Returning direct A2A result (blocking mode or no webhook)")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {
-                "id": request_id,
-                "contextId": request_id, # Assuming contextId can be the same as request_id for simplicity
-                "status": {
-                    "state": "completed",
-                    "message": {
-                        "kind": "message",
-                        "role": "agent",
-                        "parts": [
-                            {
-                                "kind": "text",
-                                "text": response_text
-                            }
-                        ],
-                        "messageId": str(uuid4()) # Generate a new messageId
-                    }
-                },
-                "artifacts": [],
-                "history": []
-            }
+            "result": a2a_result
         }
 
     except Exception as e:
