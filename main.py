@@ -262,11 +262,13 @@ async def a2a_agent(request: Request):
             if webhook_url:
                 logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
-                # Construct the webhook payload - send FULL TaskResult per A2A spec
+                # Construct the webhook payload for Telex
                 webhook_payload = {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": a2a_result  # Send complete TaskResult structure
+                    "result": {
+                        "message": a2a_result["status"]["message"]  # Message at root level
+                    }
                 }
 
                 try:
