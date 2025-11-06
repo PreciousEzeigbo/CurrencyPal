@@ -227,7 +227,7 @@ async def a2a_agent(request: Request):
                 "state": "completed",
                 "timestamp": datetime.utcnow().isoformat(), # Add timestamp
                 "message": {
-                    "messageId": str(uuid4()), # Generate a new messageId
+                    "kind": "message",
                     "role": "agent",
                     "parts": [
                         {
@@ -235,13 +235,13 @@ async def a2a_agent(request: Request):
                             "text": response_text
                         }
                     ],
-                    "kind": "message",
-                    "taskId": request_id
+                    "messageId": str(uuid4()), # Generate a new messageId
+                    "taskId": request_id # Add taskId
                 }
             },
             "artifacts": [],
             "history": [],
-            "kind": "task"
+            "kind": "task" # Add the missing 'kind' field
         }
 
         # Get configuration
@@ -262,8 +262,17 @@ async def a2a_agent(request: Request):
             if webhook_url:
                 logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
-                # Telex webhook expects just the message object (not JSON-RPC wrapped)
-                webhook_payload = a2a_result["status"]["message"]
+                # Construct the webhook payload - send just the message in result
+                webhook_payload = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "kind": "message",
+                        "role": "agent",
+                        "parts": a2a_result["status"]["message"]["parts"],
+                        "messageId": a2a_result["status"]["message"]["messageId"]
+                    }
+                }
 
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
