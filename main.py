@@ -225,6 +225,7 @@ async def a2a_agent(request: Request):
             "contextId": request_id, # Assuming contextId can be the same as request_id for simplicity
             "status": {
                 "state": "completed",
+                "timestamp": datetime.utcnow().isoformat(), # Add timestamp
                 "message": {
                     "kind": "message",
                     "role": "agent",
@@ -234,7 +235,8 @@ async def a2a_agent(request: Request):
                             "text": response_text
                         }
                     ],
-                    "messageId": str(uuid4()) # Generate a new messageId
+                    "messageId": str(uuid4()), # Generate a new messageId
+                    "taskId": request_id # Add taskId
                 }
             },
             "artifacts": [],
@@ -261,18 +263,11 @@ async def a2a_agent(request: Request):
                 logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
                 # Construct the webhook payload as a JSON-RPC RESPONSE (not request)
+                # The result should be the a2a_result object itself
                 webhook_payload = {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {
-                        "kind": "message",
-                        "role": "agent",
-                        "parts": [
-                        {"kind": "text", "text": response_text}
-                        ],
-                        "artifacts": [],
-                        "history": []
-                        }
+                    "result": a2a_result
                 }
 
                 try:
