@@ -262,9 +262,17 @@ async def a2a_agent(request: Request):
             if webhook_url:
                 logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
-                # Construct the webhook payload as the a2a_result object itself
-                # This aligns with the client's BotReturnRequest expectation
-                webhook_payload = a2a_result
+                # Construct the webhook payload - send just the message in result
+                webhook_payload = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "kind": "message",
+                        "role": "agent",
+                        "parts": a2a_result["status"]["message"]["parts"],
+                        "messageId": a2a_result["status"]["message"]["messageId"]
+                    }
+                }
 
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -291,13 +299,11 @@ async def a2a_agent(request: Request):
                     logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
                     logger.error(f"❌ Webhook URL was: {webhook_url}")
                 
-                # In non-blocking mode, after sending to webhook, still return the full result to the client
-                # This ensures the bot receives the actual conversion result
-                logger.info(f"↩️ Returning direct A2A result (non-blocking mode with webhook)")
+                # Return acknowledgment for non-blocking mode
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": a2a_result
+                    "result": {"status": "processing"}
                 }
         
         # Blocking mode or no webhook config - return full A2A result directly
