@@ -300,11 +300,13 @@ async def a2a_agent(request: Request):
                     logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
                     logger.error(f"❌ Webhook URL was: {webhook_url}")
                 
-                # Return acknowledgment for non-blocking mode
+                # In non-blocking mode, after sending to webhook, still return the full result to the client
+                # This ensures the bot receives the actual conversion result
+                logger.info(f"↩️ Returning direct A2A result (non-blocking mode with webhook)")
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {"status": "processing"}
+                    "result": a2a_result
                 }
         
         # Blocking mode or no webhook config - return full A2A result directly
