@@ -260,19 +260,10 @@ async def a2a_agent(request: Request):
             token = push_config.get("token")
             
             if webhook_url:
-                logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
+                logger.info(f"📤 Sending message to webhook: {webhook_url}")
                 
-                # Construct the webhook payload - send just the message in result
-                webhook_payload = {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "kind": "message",
-                        "role": "agent",
-                        "parts": a2a_result["status"]["message"]["parts"],
-                        "messageId": a2a_result["status"]["message"]["messageId"]
-                    }
-                }
+                # Telex webhook expects just the raw message object (no JSON-RPC wrapper)
+                webhook_payload = a2a_result["status"]["message"]
 
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
