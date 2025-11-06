@@ -227,7 +227,7 @@ async def a2a_agent(request: Request):
                 "state": "completed",
                 "timestamp": datetime.utcnow().isoformat(), # Add timestamp
                 "message": {
-                    "kind": "message",
+                    "messageId": str(uuid4()), # Generate a new messageId
                     "role": "agent",
                     "parts": [
                         {
@@ -235,13 +235,13 @@ async def a2a_agent(request: Request):
                             "text": response_text
                         }
                     ],
-                    "messageId": str(uuid4()), # Generate a new messageId
-                    "taskId": request_id # Add taskId
+                    "kind": "message",
+                    "taskId": request_id
                 }
             },
             "artifacts": [],
             "history": [],
-            "kind": "task" # Add the missing 'kind' field
+            "kind": "task"
         }
 
         # Get configuration
@@ -262,16 +262,11 @@ async def a2a_agent(request: Request):
             if webhook_url:
                 logger.info(f"📤 Sending full A2A result to webhook: {webhook_url}")
                 
-                # Construct the webhook payload - send just the message in result
+                # Construct the webhook payload - send FULL TaskResult per A2A spec
                 webhook_payload = {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {
-                        "kind": "message",
-                        "role": "agent",
-                        "parts": a2a_result["status"]["message"]["parts"],
-                        "messageId": a2a_result["status"]["message"]["messageId"]
-                    }
+                    "result": a2a_result  # Send complete TaskResult structure
                 }
 
                 try:
