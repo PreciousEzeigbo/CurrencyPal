@@ -298,16 +298,9 @@ async def a2a_agent(request: Request):
                 except Exception as e:
                     logger.error(f"❌ Webhook error: {str(e)}", exc_info=True)
                     logger.error(f"❌ Webhook URL was: {webhook_url}")
-                
-                # Return acknowledgment for non-blocking mode
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"status": "processing"}
-                }
         
-        # Blocking mode or no webhook config - return full A2A result directly
-        logger.info(f"↩️ Returning direct A2A result (blocking mode or no webhook)")
+        # Return full A2A result for both blocking and non-blocking modes
+        logger.info(f"↩️ Returning full TaskResult")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
